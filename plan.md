@@ -461,3 +461,5 @@ print("All verification checks passed.")
 | 5 | ResNet-18 dual (mel + waveform) | 82–90% |
 | 6 | MFCC+Chroma Fusion | 75–85% |
 | 7 | Weighted Ensemble (best models) | 90%+ |
+
+# STFT

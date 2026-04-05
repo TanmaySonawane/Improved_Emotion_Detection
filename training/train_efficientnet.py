@@ -14,7 +14,7 @@ import sys
 
 import torch
 import torch.optim as optim
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
@@ -55,7 +55,7 @@ def main():
 
     history = TrainingHistory()
     ckpt_path = os.path.join(OUTPUT_DIR, "best_model.pth")
-    scaler = GradScaler()
+    scaler = GradScaler("cuda" if torch.cuda.is_available() else "cpu")
 
     # ================================================================
     # PHASE 1: Warmup — freeze backbone, train head only
@@ -79,17 +79,18 @@ def main():
               f"val_loss={val_loss:.4f} acc={val_acc:.4f}")
 
     # ================================================================
-    # PHASE 2: Fine-tune — unfreeze top 3 MBConv blocks
+    # PHASE 2: Fine-tune — unfreeze ALL layers, very low LR
     # ================================================================
-    print(f"\n--- Phase 2: Fine-tune (≤{config.EFFICIENTNET_FINETUNE_EPOCHS} epochs, top blocks unfrozen) ---")
-    model.unfreeze_top_blocks(n_blocks=3)
+    print(f"\n--- Phase 2: Fine-tune (≤{config.EFFICIENTNET_FINETUNE_EPOCHS} epochs, full backbone unfrozen) ---")
+    model.unfreeze_all()
 
-    optimizer_p2 = optim.Adam(
+    optimizer_p2 = optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
-        lr=config.EFFICIENTNET_FINETUNE_LR,   # lower LR to protect pretrained weights
+        lr=config.EFFICIENTNET_FINETUNE_LR,   # 5e-5 — low enough to not destroy pretrained weights
+        weight_decay=1e-4,
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer_p2, mode="min", patience=5, factor=0.5, verbose=True
+        optimizer_p2, mode="min", patience=4, factor=0.5, verbose=True
     )
     early_stop = EarlyStopping(
         patience=config.EARLY_STOP_PATIENCE,

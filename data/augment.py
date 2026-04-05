@@ -62,6 +62,40 @@ def augment_pitch(y_orig: np.ndarray, n_steps: int) -> np.ndarray:
     return librosa.effects.pitch_shift(y_orig, sr=config.SAMPLE_RATE, n_steps=float(n_steps))
 
 
+def augment_time_stretch(y_orig: np.ndarray, rate: float) -> np.ndarray:
+    """
+    Stretch or compress the audio in time without changing pitch.
+
+    rate > 1.0 → faster (shorter duration, more energetic feel)
+    rate < 1.0 → slower (longer duration, more drawn-out feel)
+    Range [0.9, 1.1] keeps the emotional content intact.
+    After stretching, re-pad/crop to original length so all features
+    have the same shape.
+    """
+    stretched = librosa.effects.time_stretch(y_orig, rate=rate)
+    # Re-center-pad to original length (same logic as center_pad in extract_features)
+    target = len(y_orig)
+    if len(stretched) >= target:
+        start = (len(stretched) - target) // 2
+        return stretched[start: start + target].astype(np.float32)
+    else:
+        pad_total = target - len(stretched)
+        pad_left  = pad_total // 2
+        pad_right = pad_total - pad_left
+        return np.pad(stretched, (pad_left, pad_right), mode="constant").astype(np.float32)
+
+
+def augment_volume(y_orig: np.ndarray, gain: float) -> np.ndarray:
+    """
+    Scale the amplitude by `gain`.
+
+    gain < 1.0 → quieter (simulates a speaker farther from the mic)
+    gain > 1.0 → louder (simulates closer recording or higher emotion intensity)
+    Range [0.7, 1.3] keeps the audio realistic and avoids clipping.
+    """
+    return (y_orig * gain).astype(np.float32)
+
+
 # ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
@@ -108,10 +142,18 @@ def augment_train_split():
         # Alternate between +1 and -1 to get balanced representation
         pitch_step = config.AUG_PITCH_STEPS[i % len(config.AUG_PITCH_STEPS)]
 
-        # --- Build variants ---
+        # --- Determine time-stretch rate: alternate fast/slow ---
+        stretch_rate = 1.1 if (i % 2 == 0) else 0.9
+
+        # --- Determine volume gain: alternate loud/quiet ---
+        gain = 1.3 if (i % 3 == 0) else 0.7
+
+        # --- Build 4 variants (was 2) → 5× train size instead of 3× ---
         variants = [
-            ("noise",        augment_noise(y_orig)),
-            (f"pitch{pitch_step:+d}", augment_pitch(y_orig, pitch_step)),
+            ("noise",                  augment_noise(y_orig)),
+            (f"pitch{pitch_step:+d}",  augment_pitch(y_orig, pitch_step)),
+            (f"stretch{stretch_rate}", augment_time_stretch(y_orig, stretch_rate)),
+            (f"vol{gain}",             augment_volume(y_orig, gain)),
         ]
 
         for aug_type, y_aug in variants:

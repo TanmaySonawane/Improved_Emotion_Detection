@@ -116,8 +116,8 @@ MAX_EPOCHS          = 100
 
 # EfficientNet two-phase training
 EFFICIENTNET_WARMUP_EPOCHS  = 10    # Phase 1: frozen backbone
-EFFICIENTNET_FINETUNE_EPOCHS = 40   # Phase 2: top layers unfrozen
-EFFICIENTNET_FINETUNE_LR    = 1e-4  # Lower LR for pretrained weights
+EFFICIENTNET_FINETUNE_EPOCHS = 60   # Phase 2: all layers unfrozen (was 40)
+EFFICIENTNET_FINETUNE_LR    = 5e-5  # Very low LR — full backbone unfrozen (was 1e-4)
 
 # ---------------------------------------------------------------------------
 # RESNET-18 WAVEFORM BRANCH
@@ -132,7 +132,7 @@ WAVEFORM_DS_SAMPLES = int(N_SAMPLES * RESAMPLE_HZ / SAMPLE_RATE)  # = 32000 (der
 # Computed in extract_features.py — documented here for reference.
 # ZCR(2) + RMS(2) + centroid(2) + rolloff(2) + bandwidth(2) + flatness(2) +
 # pitch(2) + MFCC_means(40) + MFCC_stds(40) + chroma_means(12) + chroma_stds(12) +
-# spectral_contrast_means(7) + spectral_contrast_stds(7) + mel_means(128) = 262
+# spectral_contrast_means(7) + spectral_contrast_stds(7) + mel_means(128) = 260
 SCALAR_DIM = (
     2 + 2 + 2 + 2 + 2 + 2 + 2     # 7 scalar features × 2 stats = 14
     + N_MFCC * 2                   # 40 means + 40 stds = 80
@@ -141,8 +141,8 @@ SCALAR_DIM = (
     + N_MELS                       # 128 mel bin means (no std to stay compact)
 )
 # = 14 + 80 + 24 + 14 + 128 = 260
-# Note: if SCALAR_DIM differs from 262 as you change the above, that is fine —
-# the models read config.SCALAR_DIM dynamically. Never hardcode 262 in model files.
+# Note: if SCALAR_DIM differs from 260 as you change the above, that is fine —
+# the models read config.SCALAR_DIM dynamically. Never hardcode 260 in model files.
 
 # ---------------------------------------------------------------------------
 # ENSEMBLE WEIGHTS  (higher weight = more trusted model)

@@ -164,7 +164,7 @@ class EfficientNetSER(nn.Module):
 
     def unfreeze_top_blocks(self, n_blocks: int = 3):
         """
-        Phase 2: unfreeze the last n_blocks MBConv blocks for fine-tuning.
+        Phase 2 (option A): unfreeze the last n_blocks MBConv blocks.
 
         EfficientNet-B0's features module has 9 children (MBConv blocks + stem).
         The later blocks learn high-level patterns — these benefit most from
@@ -186,6 +186,21 @@ class EfficientNetSER(nn.Module):
             param.requires_grad = True
 
         print(f"  [EfficientNet] Unfroze top {n_blocks} MBConv blocks. "
+              f"Trainable params: {self.count_trainable_params():,}")
+
+    def unfreeze_all(self):
+        """
+        Phase 2 (option B): unfreeze ALL backbone layers for full fine-tuning.
+
+        Used when Phase 1 has already warmed up the classifier head and the
+        backbone needs to fully adapt to spectrograms. Requires a lower LR
+        (5e-5) to avoid destroying pretrained weights in early layers.
+        """
+        for param in self.features.parameters():
+            param.requires_grad = True
+        for param in self.classifier.parameters():
+            param.requires_grad = True
+        print(f"  [EfficientNet] All backbone layers unfrozen. "
               f"Trainable params: {self.count_trainable_params():,}")
 
     def count_trainable_params(self) -> int:

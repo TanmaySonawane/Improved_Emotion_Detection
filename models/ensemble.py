@@ -72,18 +72,18 @@ def _load_pytorch_model(model_name: str, ckpt_path: str):
         from models.resnet18_dual import ResNet18DualSER
         model = ResNet18DualSER()
     elif "cnn_bilstm_mel" in model_name:
-        from models.cnn_bilstm_mel import CNNBiLSTMMel
-        model = CNNBiLSTMMel()
+        from models.cnn_bilstm_mel import CNNBiLSTMMelSER
+        model = CNNBiLSTMMelSER()
     elif "cnn_bilstm_mfcc" in model_name:
-        from models.cnn_bilstm_mfcc import CNNBiLSTMMFCC
-        model = CNNBiLSTMMFCC()
+        from models.cnn_bilstm_mfcc import CNNBiLSTMMFCCSER
+        model = CNNBiLSTMMFCCSER()
     elif "fusion" in model_name:
         from models.fusion import FusionSER
         model = FusionSER()
     else:
         raise ValueError(f"Unknown PyTorch model name: {model_name}")
 
-    state = torch.load(ckpt_path, map_location="cpu")
+    state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model.load_state_dict(state)
     return model
 
@@ -92,10 +92,46 @@ def _load_pytorch_model(model_name: str, ckpt_path: str):
 # PROBABILITY EXTRACTION
 # ---------------------------------------------------------------------------
 
+def _tta_augment(batch: dict) -> list:
+    """
+    Generate 3 views of each mel for Test-Time Augmentation:
+      - original (no change)
+      - mild time mask (15 frames)
+      - mild freq mask (10 bins)
+
+    Returns list of 3 batch dicts sharing all tensors except mel.
+    Only the mel key is altered — all other features stay identical.
+    """
+    mel = batch["mel"]   # (B, N_MELS, N_FRAMES)
+    views = [batch]      # view 0: original
+
+    # View 1: time mask
+    b1 = {k: v for k, v in batch.items()}
+    m1 = mel.clone()
+    t  = 15
+    t0 = (mel.shape[2] - t) // 2   # mask the center region
+    m1[:, :, t0:t0+t] = 0.0
+    b1["mel"] = m1
+    views.append(b1)
+
+    # View 2: freq mask
+    b2 = {k: v for k, v in batch.items()}
+    m2 = mel.clone()
+    f  = 10
+    f0 = (mel.shape[1] - f) // 2
+    m2[:, f0:f0+f, :] = 0.0
+    b2["mel"] = m2
+    views.append(b2)
+
+    return views
+
+
 def get_pytorch_probs(model_name: str, ckpt_path: str,
-                       test_loader, device: torch.device) -> np.ndarray:
+                       test_loader, device: torch.device,
+                       use_tta: bool = True) -> np.ndarray:
     """
     Run a PyTorch model on the test set and return softmax probabilities.
+    With TTA, averages probabilities over 3 augmented views per sample.
 
     Returns:
         probs: np.ndarray of shape (N_test_samples, NUM_CLASSES)
@@ -107,11 +143,20 @@ def get_pytorch_probs(model_name: str, ckpt_path: str,
     all_probs = []
     with torch.no_grad():
         for batch in test_loader:
-            logits = model(batch, device)               # (B, NUM_CLASSES)
-            probs  = F.softmax(logits, dim=1)           # (B, NUM_CLASSES)
-            all_probs.append(probs.cpu().numpy())
+            if use_tta:
+                views = _tta_augment(batch)
+                view_probs = []
+                for view in views:
+                    logits = model(view, device)
+                    view_probs.append(F.softmax(logits, dim=1).cpu().numpy())
+                # Average across 3 views
+                probs = np.mean(view_probs, axis=0)   # (B, NUM_CLASSES)
+            else:
+                logits = model(batch, device)
+                probs  = F.softmax(logits, dim=1).cpu().numpy()
+            all_probs.append(probs)
 
-    return np.concatenate(all_probs, axis=0)            # (N, NUM_CLASSES)
+    return np.concatenate(all_probs, axis=0)           # (N, NUM_CLASSES)
 
 
 def get_sklearn_probs(out_dir: str) -> tuple:
@@ -161,19 +206,24 @@ class EnsemblePredictor:
     """
 
     def __init__(self):
-        self.available   = {}   # model_name → ckpt_path or out_dir
-        self.raw_weights = {}   # model_name → raw weight from config
-        self.norm_weights= {}   # model_name → normalized weight (sums to 1)
-        self.probs_dict  = {}   # model_name → (N, NUM_CLASSES) ndarray
-        self.true_labels = None
+        self.available    = {}   # model_name → ckpt_path or out_dir
+        self.raw_weights  = {}   # model_name → raw weight from config
+        self.norm_weights = {}   # model_name → normalized weight (sums to 1)
+        self.opt_weights  = {}   # model_name → val-optimized weight (set by optimize_weights)
+        self.probs_dict   = {}   # model_name → (N_test, NUM_CLASSES) ndarray
+        self.val_probs    = {}   # model_name → (N_val,  NUM_CLASSES) ndarray
+        self.true_labels  = None
+        self.val_labels   = None
 
-    def build(self, device: torch.device, test_loader=None):
+    def build(self, device: torch.device, test_loader=None, val_loader=None):
         """
         Detect available models and collect their test-set probabilities.
 
         Args:
             device:      torch.device for PyTorch models
             test_loader: DataLoader for the test split (created internally if None)
+            val_loader:  DataLoader for the val split (created internally if None)
+                         Used by optimize_weights() — not strictly required.
         """
         self.available = _detect_available_models()
 
@@ -194,34 +244,110 @@ class EnsemblePredictor:
         for m, w in self.norm_weights.items():
             print(f"  {m}: {w:.3f}")
 
-        # Create test loader if not provided
-        if test_loader is None:
+        # Create loaders if not provided
+        if test_loader is None or val_loader is None:
             from data.dataset import get_dataloader
-            test_loader = get_dataloader("test")
+            if test_loader is None:
+                test_loader = get_dataloader("test")
+            if val_loader is None:
+                val_loader = get_dataloader("val")
 
-        # Collect true labels once (same for all models)
+        # Collect true labels for test and val
         true_labels_list = []
         for batch in test_loader:
             true_labels_list.extend(batch["label"].numpy())
         self.true_labels = np.array(true_labels_list)
 
-        # Get probabilities from each available model
+        val_labels_list = []
+        for batch in val_loader:
+            val_labels_list.extend(batch["label"].numpy())
+        self.val_labels = np.array(val_labels_list)
+
+        # Get probabilities from each available model (test + val)
         print()
         for model_name, ckpt_or_dir in self.available.items():
             print(f"  Running inference: {model_name}...")
             if model_name == "model1_traditional":
                 probs, _ = get_sklearn_probs(ckpt_or_dir)
+                # val probs for model1
+                from models.traditional_ml import load_scalar_features
+                import pickle
+                svm_path    = os.path.join(ckpt_or_dir, "svm_model.pkl")
+                scaler_path = os.path.join(ckpt_or_dir, "scaler.pkl")
+                with open(svm_path,    "rb") as f: svm    = pickle.load(f)
+                with open(scaler_path, "rb") as f: scaler = pickle.load(f)
+                X_val, _ = load_scalar_features("val")
+                X_val_s  = scaler.transform(X_val)
+                val_probs_raw = svm.predict_proba(X_val_s)
+                val_probs = np.zeros((val_probs_raw.shape[0], config.NUM_CLASSES), dtype=np.float32)
+                for col_idx, cls in enumerate(svm.classes_):
+                    val_probs[:, int(cls)] = val_probs_raw[:, col_idx]
             else:
-                probs = get_pytorch_probs(
-                    model_name, ckpt_or_dir, test_loader, device
-                )
+                probs     = get_pytorch_probs(model_name, ckpt_or_dir, test_loader, device)
+                val_probs = get_pytorch_probs(model_name, ckpt_or_dir, val_loader,  device)
             self.probs_dict[model_name] = probs
+            self.val_probs[model_name]  = val_probs
             print(f"    Probs shape: {probs.shape}")
 
-    def predict_test(self) -> tuple:
+    def optimize_weights(self):
+        """
+        Find ensemble weights that maximize validation set accuracy using
+        scipy.optimize. Stores results in self.opt_weights.
+
+        The search is over a (N_models,) simplex: weights >= 0, sum = 1.
+        Objective: minimize negative validation accuracy.
+        """
+        from scipy.optimize import minimize
+        from sklearn.metrics import accuracy_score
+
+        if not self.val_probs:
+            print("  [Ensemble] No val probs available — using normalized config weights.")
+            self.opt_weights = self.norm_weights.copy()
+            return
+
+        model_names = list(self.val_probs.keys())
+        n = len(model_names)
+
+        def neg_val_acc(w):
+            w = np.array(w)
+            w = np.clip(w, 0, None)
+            total = w.sum()
+            if total < 1e-8:
+                return 1.0  # worst possible (0% accuracy)
+            w = w / total
+            combined = sum(w[i] * self.val_probs[model_names[i]] for i in range(n))
+            preds = combined.argmax(axis=1)
+            return -accuracy_score(self.val_labels, preds)
+
+        # Start from current normalized weights
+        w0 = np.array([self.norm_weights[m] for m in model_names])
+
+        result = minimize(
+            neg_val_acc,
+            w0,
+            method="SLSQP",
+            bounds=[(0.0, 1.0)] * n,
+            constraints={"type": "eq", "fun": lambda w: w.sum() - 1.0},
+            options={"maxiter": 500, "ftol": 1e-6},
+        )
+
+        opt_w = np.clip(result.x, 0, None)
+        opt_w = opt_w / opt_w.sum()
+
+        self.opt_weights = {model_names[i]: float(opt_w[i]) for i in range(n)}
+
+        print("\nOptimized weights (val-set accuracy maximization):")
+        for m, w in self.opt_weights.items():
+            print(f"  {m}: {w:.3f}")
+        print(f"  Val accuracy at optimized weights: {-result.fun:.4f}")
+
+    def predict_test(self, use_optimized: bool = True) -> tuple:
         """
         Compute the weighted average of all model probabilities.
 
+        Args:
+            use_optimized: If True and optimize_weights() has been called,
+                           use val-optimized weights. Falls back to norm_weights.
         Returns:
             final_probs: (N, NUM_CLASSES) — weighted average probabilities
             true_labels: (N,) — ground truth
@@ -229,12 +355,13 @@ class EnsemblePredictor:
         if not self.probs_dict:
             raise RuntimeError("Call build() first.")
 
-        # Weighted sum of probability arrays
+        weights = self.opt_weights if (use_optimized and self.opt_weights) else self.norm_weights
+
         final_probs = np.zeros(
             (len(self.true_labels), config.NUM_CLASSES), dtype=np.float32
         )
         for model_name, probs in self.probs_dict.items():
-            final_probs += self.norm_weights[model_name] * probs
+            final_probs += weights[model_name] * probs
 
         return final_probs, self.true_labels
 

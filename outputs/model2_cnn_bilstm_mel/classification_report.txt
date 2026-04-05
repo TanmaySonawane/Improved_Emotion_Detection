@@ -1,0 +1,13 @@
+Model: CNN+BiLSTM+Attention (Mel)
+==================================================
+              precision    recall  f1-score   support
+
+       angry     0.7098    0.8120    0.7575       250
+        fear     0.6473    0.6240    0.6354       250
+       happy     0.6413    0.7080    0.6730       250
+     neutral     0.7129    0.7236    0.7182       199
+         sad     0.7113    0.5520    0.6216       250
+
+    accuracy                         0.6822      1199
+   macro avg     0.6845    0.6839    0.6811      1199
+weighted avg     0.6833    0.6822    0.6796      1199

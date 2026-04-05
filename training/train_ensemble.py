@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 from models.ensemble import EnsemblePredictor
 from training.train_utils import get_device
-from evaluation.evaluate import plot_training_curves
 
 OUTPUT_DIR = os.path.join(config.OUTPUTS_DIR, "model7_ensemble")
 
@@ -34,8 +33,13 @@ def main():
 
     device = get_device()
 
+    from data.dataset import get_dataloader
+    val_loader  = get_dataloader("val")
+    test_loader = get_dataloader("test")
+
     ensemble = EnsemblePredictor()
-    ensemble.build(device=device)
+    ensemble.build(device=device, test_loader=test_loader, val_loader=val_loader)
+    ensemble.optimize_weights()
     acc, macro_f1 = ensemble.save_results(output_dir=OUTPUT_DIR)
 
     print("\n" + "=" * 60)

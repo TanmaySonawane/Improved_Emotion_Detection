@@ -11,6 +11,8 @@
 #   python Scripts/run_pipeline.py --step augment   # just augmentation
 #   python Scripts/run_pipeline.py --step verify    # verify data integrity
 #   python Scripts/run_pipeline.py --step train1    # traditional ML
+#   python Scripts/run_pipeline.py --step train2    # CNN+BiLSTM mel
+#   python Scripts/run_pipeline.py --step train3    # CNN+BiLSTM MFCC
 #   python Scripts/run_pipeline.py --step train4    # EfficientNet-B0
 #   python Scripts/run_pipeline.py --step train5    # ResNet-18
 #   python Scripts/run_pipeline.py --step evaluate  # print comparison table
@@ -254,6 +256,30 @@ def step_train1():
     train_and_evaluate()
 
 
+def step_train2():
+    print("\n" + "=" * 60)
+    print("STEP — Model 2: CNN+BiLSTM+Attention (Mel)")
+    print("=" * 60)
+    import training.train_cnn_bilstm as t
+    t.main("mel")
+
+
+def step_train3():
+    print("\n" + "=" * 60)
+    print("STEP — Model 3: CNN+BiLSTM+Attention (MFCC)")
+    print("=" * 60)
+    import training.train_cnn_bilstm as t
+    t.main("mfcc")
+
+
+def step_train6():
+    print("\n" + "=" * 60)
+    print("STEP — Model 6: MFCC + Chroma Fusion")
+    print("=" * 60)
+    import training.train_fusion as t
+    t.main()
+
+
 def step_train4():
     print("\n" + "=" * 60)
     print("STEP 5 — Model 4: EfficientNet-B0")
@@ -301,14 +327,18 @@ STEPS = {
     "augment":  (step_augment,  "Offline augmentation"),
     "verify":   (step_verify,   "Data integrity verification"),
     "train1":   (step_train1,   "Train Model 1: Traditional ML"),
+    "train2":   (step_train2,   "Train Model 2: CNN+BiLSTM+Attention (Mel)"),
+    "train3":   (step_train3,   "Train Model 3: CNN+BiLSTM+Attention (MFCC)"),
     "train4":   (step_train4,   "Train Model 4: EfficientNet-B0"),
     "train5":   (step_train5,   "Train Model 5: ResNet-18"),
+    "train6":   (step_train6,   "Train Model 6: MFCC+Chroma Fusion"),
     "ensemble": (step_ensemble, "Ensemble (combine completed models)"),
     "evaluate": (step_evaluate, "Model comparison table"),
 }
 
 FULL_ORDER = ["env", "extract", "manifest", "augment", "verify",
-              "train1", "train4", "train5", "ensemble", "evaluate"]
+              "train1", "train2", "train3", "train4", "train5", "train6",
+              "ensemble", "evaluate"]
 
 
 if __name__ == "__main__":

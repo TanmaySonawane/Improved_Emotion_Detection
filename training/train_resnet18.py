@@ -9,7 +9,7 @@ import sys
 
 import torch
 import torch.optim as optim
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
@@ -47,13 +47,18 @@ def main():
         weight=class_weights,
     )
 
-    optimizer  = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
-    scheduler  = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=5, factor=0.5, verbose=True
+    optimizer  = optim.AdamW(model.parameters(), lr=config.LEARNING_RATE,
+                             weight_decay=1e-4)
+    # CosineAnnealingWarmRestarts restarts every T_0=20 epochs (doubling each time).
+    # With T_max=100 and early stopping at epoch 22, plain CosineAnnealingLR never
+    # reaches its low-LR fine-tuning phase. Warm restarts ensure each 20-epoch cycle
+    # completes a full cosine sweep regardless of when early stopping fires.
+    scheduler  = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=20, T_mult=2, eta_min=1e-6
     )
-    scaler     = GradScaler()
+    scaler     = GradScaler("cuda" if torch.cuda.is_available() else "cpu")
     ckpt_path  = os.path.join(OUTPUT_DIR, "best_model.pth")
-    early_stop = EarlyStopping(checkpoint_path=ckpt_path)
+    early_stop = EarlyStopping(patience=12, checkpoint_path=ckpt_path)
     history    = TrainingHistory()
 
     print(f"\nTraining for up to {config.MAX_EPOCHS} epochs...")
@@ -63,7 +68,7 @@ def main():
         )
         val_loss, val_acc, _, _ = validate(model, val_loader, criterion, device)
         history.record(train_loss, val_loss, train_acc, val_acc)
-        scheduler.step(val_loss)
+        scheduler.step()
 
         print(f"  Epoch {epoch:3d}/{config.MAX_EPOCHS} | "
               f"train_loss={train_loss:.4f} acc={train_acc:.4f} | "

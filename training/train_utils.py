@@ -17,8 +17,10 @@ import copy
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import GradScaler
 from sklearn.utils.class_weight import compute_class_weight
+
+_DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "cpu"
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
@@ -135,29 +137,61 @@ class LabelSmoothingCrossEntropy(nn.Module):
 # AMP TRAINING LOOP
 # ---------------------------------------------------------------------------
 
+def mixup_batch(batch: dict, labels: torch.Tensor,
+                alpha: float = 0.4, device: torch.device = None) -> tuple:
+    """
+    Apply Mixup augmentation to an entire batch in-place on the mel tensor.
+
+    Mixup blends pairs of training samples:
+        mel_mix   = λ · mel_a   + (1-λ) · mel_b
+        label_mix = λ · onehot_a + (1-λ) · onehot_b
+
+    Why this helps: forces the model to learn smooth decision boundaries
+    between emotion classes instead of memorising hard examples. Particularly
+    effective for SER because emotion is a continuous spectrum — blending
+    "angry" and "fearful" samples represents plausible real-world variation.
+
+    Args:
+        batch:  full batch dict (modified in-place for mel)
+        labels: (B,) integer labels on device
+        alpha:  Beta distribution parameter. 0.4 gives moderate mixing.
+
+    Returns:
+        mixed_batch, (labels_a, labels_b, lam) for computing mixed loss
+    """
+    lam = float(np.random.beta(alpha, alpha))
+    B   = labels.size(0)
+    idx = torch.randperm(B, device=labels.device)
+
+    # Mix mel spectrogram in the batch dict
+    mel_a = batch["mel"].to(device)
+    mel_b = mel_a[idx]
+    batch["mel"] = lam * mel_a + (1 - lam) * mel_b
+
+    return batch, (labels, labels[idx], lam)
+
+
+def mixup_criterion(criterion, outputs, labels_a, labels_b, lam):
+    """Compute mixed loss: λ·loss(pred, a) + (1-λ)·loss(pred, b)."""
+    return lam * criterion(outputs, labels_a) + (1 - lam) * criterion(outputs, labels_b)
+
+
 def train_one_epoch(model: nn.Module,
                     loader,
                     optimizer: torch.optim.Optimizer,
                     scaler: GradScaler,
                     criterion: nn.Module,
                     device: torch.device,
+                    use_mixup: bool = True,
                     feature_key: str = "mel") -> tuple:
     """
-    Run one training epoch with Automatic Mixed Precision (AMP).
-
-    AMP uses float16 for most computations (faster, less VRAM) while keeping
-    critical parts in float32 to prevent NaN gradients.
-
-    Args:
-        feature_key: Which key to extract from the batch dict as the primary
-                     input. Can be "mel", "mfcc", etc. For multi-input models,
-                     the model's forward() receives the full batch dict.
+    Run one training epoch with AMP + optional Mixup augmentation.
 
     Returns:
         (avg_loss, accuracy) for this epoch.
     """
     model.train()
-    total_loss   = 0.0
+    total_loss    = 0.0
     total_correct = 0
     total_samples = 0
 
@@ -166,19 +200,27 @@ def train_one_epoch(model: nn.Module,
 
         optimizer.zero_grad()
 
-        with autocast():
-            # Pass the full batch dict to the model.
-            # Each model's forward() picks what it needs.
-            outputs = model(batch, device)   # (batch, num_classes) logits
-            loss    = criterion(outputs, labels)
+        if use_mixup:
+            batch, (lab_a, lab_b, lam) = mixup_batch(batch, labels, alpha=0.4, device=device)
+
+        with torch.amp.autocast(_DEVICE_TYPE):
+            outputs = model(batch, device)
+            if use_mixup:
+                loss = mixup_criterion(criterion, outputs, lab_a, lab_b, lam)
+            else:
+                loss = criterion(outputs, labels)
 
         scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
 
         total_loss    += loss.item() * len(labels)
         preds          = outputs.argmax(dim=1)
-        total_correct += (preds == labels).sum().item()
+        # Accuracy against the dominant label (labels_a) for display only
+        ref_labels = lab_a if use_mixup else labels
+        total_correct += (preds == ref_labels).sum().item()
         total_samples += len(labels)
 
     avg_loss = total_loss / total_samples

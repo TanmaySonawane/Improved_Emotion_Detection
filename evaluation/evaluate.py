@@ -291,9 +291,6 @@ def evaluate_from_checkpoint(model_name: str):
     elif "cnn_bilstm_mfcc" in model_name:
         from models.cnn_bilstm_mfcc import CNNBiLSTMMFCC
         model = CNNBiLSTMMFCC()
-    elif "fusion" in model_name:
-        from models.fusion import FusionSER
-        model = FusionSER()
     else:
         print(f"Unknown model_name: {model_name}")
         return

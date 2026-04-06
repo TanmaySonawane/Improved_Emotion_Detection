@@ -44,5 +44,9 @@ seaborn>=0.12.0
 # ---- Utilities ----
 tqdm>=4.65.0            # progress bars (optional but useful during extraction)
 
+# ---- Transformer Models (needed for Model 9: Wav2Vec2 fine-tuning) ----
+# Install AFTER PyTorch — transformers uses torch automatically
+transformers>=4.35.0
+
 # ---- Deployment (install when you reach the Gradio app step) ----
 gradio>=4.0.0

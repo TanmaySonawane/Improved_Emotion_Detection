@@ -1,10 +1,11 @@
 # =============================================================================
-# train_cnn_bilstm.py — Train Model 2 (mel)
+# train_multifeature.py — Train Model 8: Multi-Feature CNN+BiLSTM+Attention
 #
-# Usage:
-#   python Scripts/training/train_cnn_bilstm.py
+# Input: mel + MFCC flat + chroma + spectral_contrast (all per-frame features)
+# Output: outputs/model8_multifeature/
 #
-# Trains the CNN+BiLSTM+Attention model on mel spectrograms.
+# Run: py run_pipeline.py --step train8
+#   or: python Scripts/training/train_multifeature.py
 # =============================================================================
 
 import os
@@ -16,6 +17,7 @@ from torch.amp import GradScaler
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
+from models.multifeature_cnn_bilstm import MultiFeatureCNNBiLSTMSER
 from data.dataset import get_dataloader
 from training.train_utils import (
     get_device, compute_class_weights_tensor, LabelSmoothingCrossEntropy,
@@ -23,30 +25,28 @@ from training.train_utils import (
 )
 from evaluation.evaluate import save_confusion_matrix, save_classification_report, plot_training_curves
 
+OUTPUT_DIR = os.path.join(config.OUTPUTS_DIR, "model8_multifeature")
+
 # ---------------------------------------------------------------------------
-# Hyperparameters (CNN+BiLSTM specific — intentionally not in config since
-# they only apply to these two models)
+# Hyperparameters
 # ---------------------------------------------------------------------------
 _LR           = 1e-3
 _WEIGHT_DECAY = 1e-4
 _MAX_EPOCHS   = 80
-_ETA_MIN      = 1e-6  # CosineAnnealingLR minimum LR
-_PATIENCE_ES  = 15    # EarlyStopping — stop after 15 no-improve epochs
+_ETA_MIN      = 1e-6
+_PATIENCE_ES  = 15    # give cosine schedule room to recover from local plateaus
 
 
 def main():
-    from models.cnn_bilstm_mel import CNNBiLSTMMelSER as ModelClass
-    output_dir = os.path.join(config.OUTPUTS_DIR, "model2_cnn_bilstm_mel")
-    model_label = "CNN+BiLSTM+Attention (Mel)"
-
     print("=" * 60)
-    print(f"Model — {model_label}")
+    print("Model 8 — Multi-Feature CNN+BiLSTM+Attention")
+    print("  Features: mel + MFCC(+Δ+ΔΔ) + chroma + spectral contrast")
     print("=" * 60)
     config.create_output_dirs()
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     device = get_device()
-    model  = ModelClass().to(device)
+    model  = MultiFeatureCNNBiLSTMSER().to(device)
     print(f"Total parameters: {model.count_params():,}")
 
     print("\nLoading data...")
@@ -62,11 +62,13 @@ def main():
     )
 
     optimizer  = optim.AdamW(model.parameters(), lr=_LR, weight_decay=_WEIGHT_DECAY)
+    # CosineAnnealingLR decays smoothly from _LR to _ETA_MIN over _MAX_EPOCHS.
+    # Called unconditionally every epoch — no plateau waiting needed.
     scheduler  = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=_MAX_EPOCHS, eta_min=_ETA_MIN
     )
     scaler     = GradScaler("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt_path  = os.path.join(output_dir, "best_model.pth")
+    ckpt_path  = os.path.join(OUTPUT_DIR, "best_model.pth")
     early_stop = EarlyStopping(patience=_PATIENCE_ES, checkpoint_path=ckpt_path)
     history    = TrainingHistory()
 
@@ -77,7 +79,7 @@ def main():
         )
         val_loss, val_acc, _, _ = validate(model, val_loader, criterion, device)
         history.record(train_loss, val_loss, train_acc, val_acc)
-        scheduler.step()   # cosine annealing steps every epoch unconditionally
+        scheduler.step()
 
         print(f"  Epoch {epoch:3d}/{_MAX_EPOCHS} | "
               f"train_loss={train_loss:.4f} acc={train_acc:.4f} | "
@@ -89,16 +91,15 @@ def main():
     print("\nLoading best checkpoint for test evaluation...")
     early_stop.load_best(model)
 
-    _, test_acc, preds, labels = validate(model, test_loader, criterion, device)
+    test_loss, test_acc, preds, labels = validate(model, test_loader, criterion, device)
     print(f"\nTest accuracy: {test_acc:.4f}")
 
-    history.save(os.path.join(output_dir, "history.json"))
-    plot_training_curves(history, output_dir, model_name=model_label)
-    save_confusion_matrix(labels, preds, output_dir, model_name=model_label)
-    save_classification_report(labels, preds, output_dir, model_name=model_label)
+    history.save(os.path.join(OUTPUT_DIR, "history.json"))
+    plot_training_curves(history, OUTPUT_DIR, model_name="Multi-Feature CNN+BiLSTM")
+    save_confusion_matrix(labels, preds, OUTPUT_DIR, model_name="Multi-Feature CNN+BiLSTM")
+    save_classification_report(labels, preds, OUTPUT_DIR, model_name="Multi-Feature CNN+BiLSTM")
 
-    print(f"\nAll outputs saved to: {output_dir}")
-    print(f"Best model checkpoint: {ckpt_path}")
+    print(f"\nAll outputs saved to: {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":

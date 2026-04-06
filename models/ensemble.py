@@ -8,7 +8,7 @@
 #   model1_traditional  → SVM (uses predict_proba from saved .pkl)
 #   model4_efficientnet → EfficientNetSER (.pth checkpoint)
 #   model5_resnet18     → ResNet18DualSER (.pth checkpoint)
-#   model2_cnn_bilstm_mel, model3_cnn_bilstm_mfcc, model6_fusion  (future)
+#   model2_cnn_bilstm_mel
 #
 # How it works:
 #   1. For each model that has a saved checkpoint, run the full test set
@@ -77,9 +77,12 @@ def _load_pytorch_model(model_name: str, ckpt_path: str):
     elif "cnn_bilstm_mfcc" in model_name:
         from models.cnn_bilstm_mfcc import CNNBiLSTMMFCCSER
         model = CNNBiLSTMMFCCSER()
-    elif "fusion" in model_name:
-        from models.fusion import FusionSER
-        model = FusionSER()
+    elif "multifeature" in model_name:
+        from models.multifeature_cnn_bilstm import MultiFeatureCNNBiLSTMSER
+        model = MultiFeatureCNNBiLSTMSER()
+    elif "wav2vec2" in model_name:
+        from models.wav2vec2_ser import Wav2Vec2SER
+        model = Wav2Vec2SER()
     else:
         raise ValueError(f"Unknown PyTorch model name: {model_name}")
 

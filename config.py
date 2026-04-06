@@ -154,13 +154,14 @@ SCALAR_DIM = (
 # Add or remove models here as training completes.
 # ---------------------------------------------------------------------------
 ENSEMBLE_WEIGHTS = {
-    "model1_traditional":     0.05,   # SVM/RF — low weight, weaker model
-    "model2_cnn_bilstm_mel":  0.20,   # pending
-    "model3_cnn_bilstm_mfcc": 0.10,   # pending
-    "model4_efficientnet":    0.30,
-    "model5_resnet18":        0.30,
-    "model6_fusion":          0.05,   # pending
+    "model1_traditional":    0.05,   # SVM/RF — low weight, weaker model
+    "model2_cnn_bilstm_mel": 0.15,
+    "model4_efficientnet":   0.15,
+    "model5_resnet18":       0.20,
+    "model8_multifeature":   0.20,   # Path B: all per-frame features jointly
+    "model9_wav2vec2":       0.30,   # Path A: pretrained wav2vec2-base (highest weight)
 }
+# Note: val-optimized SLSQP weights override these at ensemble time anyway.
 
 # ---------------------------------------------------------------------------
 # DEPLOYMENT
@@ -173,11 +174,11 @@ CONFIDENCE_THRESHOLD = 0.5    # Reject prediction if max softmax < this value
 _MODEL_OUTPUT_DIRS = [
     "model1_traditional",
     "model2_cnn_bilstm_mel",
-    "model3_cnn_bilstm_mfcc",
     "model4_efficientnet",
     "model5_resnet18",
-    "model6_fusion",
     "model7_ensemble",
+    "model8_multifeature",   # Path B: multi-feature CNN+BiLSTM
+    "model9_wav2vec2",       # Path A: wav2vec2-base fine-tuned
 ]
 
 def create_output_dirs():

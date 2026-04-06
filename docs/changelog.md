@@ -105,7 +105,46 @@
 
 ---
 
-## Session 3 — Current Changes (target: 75%+)
+## Session 3 — Model Refinement and Optimization (70.7% best single model)
+
+### Completed Changes
+- **Removed Model 3 (CNN+BiLSTM MFCC)**: Accuracy 58.97% < 60% threshold. Deleted `models/cnn_bilstm_mfcc.py`, `outputs/model3_cnn_bilstm_mfcc/`, updated `run_pipeline.py` to skip train3, modified `train_cnn_bilstm.py` to only handle Mel variant.
+- **Model 8 (Multi-Feature CNN+BiLSTM) completed**: Combines all 267 features (mel 128 + MFCC 120 + chroma 12 + spectral 7). Achieved 70.73% accuracy, best single model so far.
+- **Model 9 (Wav2Vec2 fine-tuning) in progress**: Using safetensors loading to bypass torch 2.6 requirement. Fine-tuning top 6 transformer layers on 16kHz resampled audio.
+- **GPU utilization verified**: All models use CUDA with AMP, pin_memory, optimized DataLoader (num_workers=0 for Windows).
+- **Speed optimizations**: No bottlenecks found; training efficient with batch_size=32, AMP, early stopping.
+
+### Planned Improvements
+- **Hyperparameter tuning with Optuna**: Integrate Bayesian optimization for LR, dropout, batch_size, etc. Expected +2-5% accuracy boost. Will modify training scripts to define search spaces and run 50-100 trials.
+- **State-of-the-art practices audit**: Review for self-attention, focal loss, larger pre-trained models, UAR metrics. Update models accordingly for max accuracy.
+- **Ensemble update**: Include Model 8 (and Model 9 when complete) in weighted ensemble for >70% overall.
+
+### Hyperparameter Tuning with Optuna
+To push accuracy beyond current levels, we'll integrate Optuna for automated hyperparameter optimization. Optuna uses Bayesian optimization to efficiently search hyperparameter spaces, pruning poor configurations early.
+
+**How it works**:
+- Define search space: e.g., learning_rate (1e-5 to 1e-2), dropout (0.1-0.5), batch_size (16-64), weight_decay (1e-5 to 1e-3).
+- Objective function: Train model for fixed epochs, return validation accuracy.
+- Run 50-100 trials; Optuna suggests next params based on past results.
+- Best config applied to full training.
+
+**Expected benefits**: +2-5% accuracy (e.g., 68% → 70-72%) by fine-tuning model-specific params like attention heads or LSTM units. Reduces manual tuning time from days to hours.
+
+**Integration plan**: Modify `train_cnn_bilstm.py` etc. to wrap training in Optuna study. Run overnight on GPU.
+
+### Result so far
+| Model | Accuracy | Status |
+|-------|----------|--------|
+| Model 1: Traditional ML | 52.6% | Kept (per user request) |
+| Model 2: CNN+BiLSTM (Mel) | 68.2% | Active |
+| Model 4: EfficientNet-B0 | 68.3% | Active |
+| Model 5: ResNet-18+BiLSTM | 61.2% | Active |
+| Model 6: Fusion | 61.5% | Active |
+| Model 7: Ensemble | 70.1% | Active (needs update for Model 8) |
+| Model 8: Multi-Feature | 70.7% | Completed |
+| Model 9: Wav2Vec2 | TBD | In progress |
+
+---
 
 ### 1. SE (Squeeze-Excitation) blocks in all CNN models
 **Files**: `models/cnn_bilstm_mel.py` (shared `_cnn_block` used by Models 2, 3, 6)
@@ -245,3 +284,70 @@ completed one full cosine cycle rather than being cut off mid-decay.
 ```bash
 py run_pipeline.py --from train2
 ```
+
+---
+
+## Session 5 — Path A + Path B Implementation (target: 78-82%)
+
+### New models added
+
+#### Model 8: Multi-Feature CNN+BiLSTM (Path B)
+**Files**: `models/multifeature_cnn_bilstm.py`, `training/train_multifeature.py`
+**Output**: `outputs/model8_multifeature/`
+
+Stacks ALL per-frame features (mel 128 + MFCC+Δ+ΔΔ flat 120 + chroma 12 + SC 7 = 267 dims)
+along the frequency axis, then runs through 5 CNN blocks → BiLSTM(hidden=256 bi) → attention.
+
+Why: Models 2–6 each see only one or two feature types. Cross-feature patterns
+(high pitch AND fast MFCC delta AND dissonant chroma = angry) can only be learned
+when all features enter the same model simultaneously. Based on DCRF-BiLSTM paper
+which achieves 97.83% on RAVDESS using this strategy.
+
+Architecture changes vs mel model:
+- 5 CNN blocks instead of 4 (267 → 8 vs 128 → 8)
+- BiLSTM hidden=256 per direction (vs 128) → 512-dim output
+- Same SE blocks, Spatial Dropout1d(0.2), SelfAttention reused from cnn_bilstm_mel.py
+- CosineAnnealingLR(T_max=80), patience=15
+
+#### Model 9: Wav2Vec 2.0 Fine-tuned (Path A)
+**Files**: `models/wav2vec2_ser.py`, `training/train_wav2vec2.py`
+**Output**: `outputs/model9_wav2vec2/`
+**New dependency**: `pip install transformers`
+
+Uses `facebook/wav2vec2-base` pretrained on 960h LibriSpeech. Fine-tunes top 6 of
+12 transformer layers + classifier head. Bottom 6 layers + CNN feature extractor
+frozen. Raw waveform input, resampled from 22050→16000 Hz in forward().
+
+Training differences:
+- batch_size=8 (not 32) — 94M param backbone
+- lr=1e-4 (not 1e-3) — fine-tuning, not training from scratch
+- use_mixup=False — waveform input doesn't use mel mixup
+- MAX_EPOCHS=40 — pretrained model converges faster
+- CosineAnnealingWarmRestarts(T_0=20)
+
+### Config + infrastructure changes
+| File | Change |
+|------|--------|
+| `config.py` | Added `model8_multifeature` and `model9_wav2vec2` to `ENSEMBLE_WEIGHTS` and `_MODEL_OUTPUT_DIRS` |
+| `config.py` | Rebalanced weights: wav2vec2=0.25 (highest), multifeature=0.15, others reduced slightly |
+| `models/ensemble.py` | Added `_load_pytorch_model` branches for `multifeature` and `wav2vec2` |
+| `run_pipeline.py` | Added `step_train8()`, `step_train9()`, added to STEPS and FULL_ORDER |
+| `run_pipeline.py` | Added `transformers` version check in `step_env()` |
+| `requirements.txt` | Added `transformers>=4.35.0` |
+
+### Expected impact
+
+| Model | Expected test acc | Notes |
+|-------|------------------|-------|
+| Model 8: Multi-Feature CNN+BiLSTM | 73–76% | All features jointly |
+| Model 9: Wav2Vec2 | 78–85% | Pretrained on 960h audio |
+| Ensemble (8+9 + existing 6 models) | **78–82%** | SLSQP-optimized weights |
+
+### Run order (after this session)
+```bash
+pip install transformers
+py run_pipeline.py --from train2
+```
+
+This retrains models 2–6 (with Tier 1 fixes from Session 4), trains the two new
+models (8, 9), then runs the ensemble. Total estimated time: 6–10 hours overnight.

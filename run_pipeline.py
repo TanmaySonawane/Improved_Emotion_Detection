@@ -12,9 +12,10 @@
 #   python Scripts/run_pipeline.py --step verify    # verify data integrity
 #   python Scripts/run_pipeline.py --step train1    # traditional ML
 #   python Scripts/run_pipeline.py --step train2    # CNN+BiLSTM mel
-#   python Scripts/run_pipeline.py --step train3    # CNN+BiLSTM MFCC
 #   python Scripts/run_pipeline.py --step train4    # EfficientNet-B0
 #   python Scripts/run_pipeline.py --step train5    # ResNet-18
+#   python Scripts/run_pipeline.py --step train8    # Multi-Feature CNN+BiLSTM (Path B)
+#   python Scripts/run_pipeline.py --step train9    # Wav2Vec2 fine-tuning (Path A)
 #   python Scripts/run_pipeline.py --step evaluate  # print comparison table
 #   python Scripts/run_pipeline.py --from extract   # run from a specific step onward
 # =============================================================================
@@ -101,6 +102,13 @@ def step_env():
         print(f"seaborn:    {seaborn.__version__}  matplotlib: {matplotlib.__version__}")
     except ImportError:
         print("seaborn/matplotlib: NOT INSTALLED  →  pip install seaborn matplotlib")
+
+    # transformers (for Model 9: Wav2Vec2)
+    try:
+        import transformers
+        print(f"transformers:{transformers.__version__}")
+    except ImportError:
+        print("transformers: not installed  →  pip install transformers  (needed for train9)")
 
     # gradio (for deployment — optional until that step)
     try:
@@ -264,22 +272,6 @@ def step_train2():
     t.main("mel")
 
 
-def step_train3():
-    print("\n" + "=" * 60)
-    print("STEP — Model 3: CNN+BiLSTM+Attention (MFCC)")
-    print("=" * 60)
-    import training.train_cnn_bilstm as t
-    t.main("mfcc")
-
-
-def step_train6():
-    print("\n" + "=" * 60)
-    print("STEP — Model 6: MFCC + Chroma Fusion")
-    print("=" * 60)
-    import training.train_fusion as t
-    t.main()
-
-
 def step_train4():
     print("\n" + "=" * 60)
     print("STEP 5 — Model 4: EfficientNet-B0")
@@ -293,6 +285,23 @@ def step_train5():
     print("STEP 6 — Model 5: ResNet-18 Dual-Input")
     print("=" * 60)
     import training.train_resnet18 as t
+    t.main()
+
+
+def step_train8():
+    print("\n" + "=" * 60)
+    print("STEP — Model 8: Multi-Feature CNN+BiLSTM (Path B)")
+    print("=" * 60)
+    import training.train_multifeature as t
+    t.main()
+
+
+def step_train9():
+    print("\n" + "=" * 60)
+    print("STEP — Model 9: Wav2Vec 2.0 Fine-tuning (Path A)")
+    print("  Requires: pip install transformers")
+    print("=" * 60)
+    import training.train_wav2vec2 as t
     t.main()
 
 
@@ -328,16 +337,17 @@ STEPS = {
     "verify":   (step_verify,   "Data integrity verification"),
     "train1":   (step_train1,   "Train Model 1: Traditional ML"),
     "train2":   (step_train2,   "Train Model 2: CNN+BiLSTM+Attention (Mel)"),
-    "train3":   (step_train3,   "Train Model 3: CNN+BiLSTM+Attention (MFCC)"),
     "train4":   (step_train4,   "Train Model 4: EfficientNet-B0"),
     "train5":   (step_train5,   "Train Model 5: ResNet-18"),
-    "train6":   (step_train6,   "Train Model 6: MFCC+Chroma Fusion"),
+    "train8":   (step_train8,   "Train Model 8: Multi-Feature CNN+BiLSTM (Path B)"),
+    "train9":   (step_train9,   "Train Model 9: Wav2Vec2 Fine-tuning (Path A)"),
     "ensemble": (step_ensemble, "Ensemble (combine completed models)"),
     "evaluate": (step_evaluate, "Model comparison table"),
 }
 
 FULL_ORDER = ["env", "extract", "manifest", "augment", "verify",
-              "train1", "train2", "train3", "train4", "train5", "train6",
+              "train1", "train2", "train4", "train5",
+              "train8", "train9",
               "ensemble", "evaluate"]
 
 

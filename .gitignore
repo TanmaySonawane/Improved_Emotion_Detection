@@ -1,1 +1,6 @@
 *.pkl
+__pycache__/
+*.pyc
+outputs/
+*.pth
+*.npy

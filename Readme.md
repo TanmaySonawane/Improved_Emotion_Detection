@@ -2,7 +2,7 @@
 
 Detecting human emotion from speech audio using deep learning — from classical machine learning baselines through fine-tuned transformer models.
 
-**Live demo:** *(HuggingFace Space link — coming soon)*  
+**Live demo:** *(HuggingFace Space link (https://huggingface.co/spaces/T22S/ser-emotion-demo))*  
 **Test accuracy:** 75.3% (Wav2Vec2) | 5-class | Speaker-independent
 
 ---
@@ -14,10 +14,10 @@ Detecting human emotion from speech audio using deep learning — from classical
 | Model 1 | SVM on 260-dim scalar features | 52.6% | 0.517 |
 | Model 1 | Random Forest on 260-dim scalar features | 52.0% | 0.513 |
 | Model 2 | CNN + BiLSTM + Attention (Mel spectrogram) | 67.4% | 0.673 |
-| Model 4 | EfficientNet-B0 (ImageNet pretrained) | 67.5% | 0.673 |
-| Model 5 | ResNet-18 (ImageNet pretrained) | 62.1% | 0.619 |
-| Model 8 | Multi-Feature CNN + BiLSTM (267-dim joint) | 70.7% | 0.705 |
-| **Model 9** | **Wav2Vec2-base fine-tuned (960h speech pretrained)** | **75.3%** | **0.749** |
+| Model 3 | EfficientNet-B0 (ImageNet pretrained) | 67.5% | 0.673 |
+| Model 4 | ResNet-18 (ImageNet pretrained) | 62.1% | 0.619 |
+| Model 5 | Multi-Feature CNN + BiLSTM (267-dim joint) | 70.7% | 0.705 |
+| **Model 6** | **Wav2Vec2-base fine-tuned (960h speech pretrained)** | **75.3%** | **0.749** |
 | Ensemble | SLSQP val-optimized weights + TTA | 75.2% | 0.751 |
 
 ---

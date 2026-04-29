@@ -94,21 +94,21 @@ Raw Audio (.wav, 22050 Hz, 4 seconds = 88,200 samples)
 - Self-attention picks the most emotionally salient time steps
 - Spatial Dropout1d prevents memorizing speaker-specific temporal patterns
 
-### Model 4 — EfficientNet-B0
+### Model 3 — EfficientNet-B0
 - Mel, chroma, and spectral contrast stacked as a 3-channel image (like RGB)
 - Two-phase training: frozen backbone → full fine-tune at 5×10⁻⁵ LR
 
-### Model 5 — ResNet-18 Dual-Input
+### Model 4 — ResNet-18 Dual-Input
 - Stream A: mel spectrogram → ResNet-18 backbone (ImageNet pretrained)
 - Stream B: raw waveform downsampled to 8kHz → 4-layer Conv1d
 - Embeddings concatenated and classified jointly
 
-### Model 8 — Multi-Feature CNN + BiLSTM
+### Model 5 — Multi-Feature CNN + BiLSTM
 - All per-frame features (267 dimensions) stacked along the frequency axis
 - Single CNN + BiLSTM tower sees cross-feature relationships simultaneously
 - Higher BiLSTM hidden size (256) per DCRF-BiLSTM paper recommendation
 
-### Model 9 — Wav2Vec2-base (best model)
+### Model 6 — Wav2Vec2-base (best model)
 - Pretrained on 960 hours of unlabeled speech via self-supervised masking objective
 - Bottom 6 of 12 transformer layers frozen; top 6 + classifier fine-tuned
 - Raw waveform resampled from 22050 Hz → 16000 Hz inside `forward()`

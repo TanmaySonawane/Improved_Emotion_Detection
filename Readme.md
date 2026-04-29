@@ -18,7 +18,6 @@ Detecting human emotion from speech audio using deep learning — from classical
 | Model 4 | ResNet-18 (ImageNet pretrained) | 62.1% | 0.619 |
 | Model 5 | Multi-Feature CNN + BiLSTM (267-dim joint) | 70.7% | 0.705 |
 | **Model 6** | **Wav2Vec2-base fine-tuned (960h speech pretrained)** | **75.3%** | **0.749** |
-| Ensemble | SLSQP val-optimized weights + TTA | 75.2% | 0.751 |
 
 ---
 
